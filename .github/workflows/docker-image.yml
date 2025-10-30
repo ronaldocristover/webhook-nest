@@ -18,10 +18,10 @@ jobs:
         run: docker login registry.digitalocean.com/so-thai -u "${{ secrets.DOCKER_KEY }}" -p "${{ secrets.DOCKER_KEY }}"
 
       - name: Build Docker Image
-        run: docker build -t "registry.digitalocean.com/so-thai/scaffolding-api" .
+        run: docker build -t "registry.digitalocean.com/so-thai/webhook-nest" .
 
       - name: Push Docker Image to Registry
-        run: docker push "registry.digitalocean.com/so-thai/scaffolding-api"
+        run: docker push "registry.digitalocean.com/so-thai/webhook-nest"
 
       - name: Logout from Registry
         run: docker logout
