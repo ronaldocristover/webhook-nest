@@ -1,0 +1,1880 @@
+# Webhook Testing Service - NestJS + Prisma + MySQL (Simplified)
+
+## Tech Stack
+- **Backend**: NestJS (Node.js)
+- **ORM**: Prisma
+- **Database**: MySQL 8.0+
+- **Authentication**: JWT
+
+---
+
+## 1. Project Structure
+
+```
+webhook-service/
+├── src/
+│   ├── app.module.ts
+│   ├── main.ts
+│   ├── common/
+│   │   ├── decorators/
+│   │   ├── filters/
+│   │   ├── guards/
+│   │   ├── interceptors/
+│   │   └── pipes/
+│   ├── config/
+│   │   └── configuration.ts
+│   ├── modules/
+│   │   ├── auth/
+│   │   │   ├── auth.module.ts
+│   │   │   ├── auth.service.ts
+│   │   │   ├── auth.controller.ts
+│   │   │   ├── guards/
+│   │   │   │   └── jwt-auth.guard.ts
+│   │   │   └── strategies/
+│   │   │       └── jwt.strategy.ts
+│   │   ├── webhooks/
+│   │   │   ├── webhooks.module.ts
+│   │   │   ├── webhooks.service.ts
+│   │   │   ├── webhooks.controller.ts
+│   │   │   └── dto/
+│   │   │       ├── create-webhook.dto.ts
+│   │   │       └── update-webhook.dto.ts
+│   │   ├── webhook-receiver/
+│   │   │   ├── webhook-receiver.module.ts
+│   │   │   ├── webhook-receiver.service.ts
+│   │   │   └── webhook-receiver.controller.ts
+│   │   ├── webhook-requests/
+│   │   │   ├── webhook-requests.module.ts
+│   │   │   ├── webhook-requests.service.ts
+│   │   │   ├── webhook-requests.controller.ts
+│   │   │   └── dto/
+│   │   │       └── query-requests.dto.ts
+│   │   └── users/
+│   │       ├── users.module.ts
+│   │       ├── users.service.ts
+│   │       └── users.controller.ts
+│   └── prisma/
+│       ├── prisma.module.ts
+│       └── prisma.service.ts
+├── prisma/
+│   ├── schema.prisma
+│   └── migrations/
+├── .env
+├── .env.example
+├── package.json
+├── tsconfig.json
+└── nest-cli.json
+```
+
+---
+
+## 2. Prisma Schema (schema.prisma)
+
+```prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String    @id @default(uuid())
+  email     String    @unique
+  password  String
+  apiKey    String?   @unique @map("api_key")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  
+  webhooks  Webhook[]
+  
+  @@map("users")
+}
+
+model Webhook {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  token       String    @unique @db.VarChar(255)
+  name        String    @db.VarChar(255)
+  description String?   @db.Text
+  isActive    Boolean   @default(true) @map("is_active")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  expiresAt   DateTime? @map("expires_at")
+  
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  requests  WebhookRequest[]
+  statistics WebhookStatistic?
+  
+  @@index([userId])
+  @@index([token])
+  @@map("webhooks")
+}
+
+model WebhookRequest {
+  id                String   @id @default(uuid())
+  webhookId         String   @map("webhook_id")
+  method            String   @db.VarChar(10)
+  path              String?  @db.Text
+  queryParams       Json?    @map("query_params")
+  headers           Json?
+  body              String?  @db.LongText
+  bodySize          BigInt?  @map("body_size")
+  ipAddress         String?  @db.VarChar(45) @map("ip_address")
+  userAgent         String?  @db.Text @map("user_agent")
+  receivedAt        DateTime @default(now()) @map("received_at")
+  processingTimeMs  Int?     @map("processing_time_ms")
+  
+  webhook Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  
+  @@index([webhookId])
+  @@index([receivedAt(sort: Desc)])
+  @@index([method])
+  @@map("webhook_requests")
+}
+
+model WebhookStatistic {
+  webhookId      String   @id @map("webhook_id")
+  totalRequests  BigInt   @default(0) @map("total_requests")
+  lastRequestAt  DateTime? @map("last_request_at")
+  methodsCount   Json?    @map("methods_count")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  
+  webhook Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  
+  @@map("webhook_statistics")
+}
+```
+
+---
+
+## 3. Environment Variables (.env.example)
+
+```env
+# Application
+NODE_ENV=development
+PORT=3000
+APP_URL=https://webhook.ronaldo.dev.com
+
+# Database
+DATABASE_URL="mysql://user:password@localhost:3306/webhook_service"
+
+# JWT
+JWT_SECRET=your-super-secret-jwt-key-change-this
+JWT_EXPIRES_IN=7d
+
+# Rate Limiting
+RATE_LIMIT_TTL=60
+RATE_LIMIT_MAX=100
+
+# Webhook Settings
+MAX_BODY_SIZE_MB=10
+REQUEST_RETENTION_DAYS=30
+```
+
+---
+
+## 4. Core Files Implementation
+
+### 4.1 Prisma Service (src/prisma/prisma.service.ts)
+
+```typescript
+import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { PrismaClient } from '@prisma/client';
+
+@Injectable()
+export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
+  async onModuleInit() {
+    await this.$connect();
+  }
+
+  async onModuleDestroy() {
+    await this.$disconnect();
+  }
+}
+```
+
+### 4.2 Prisma Module (src/prisma/prisma.module.ts)
+
+```typescript
+import { Global, Module } from '@nestjs/common';
+import { PrismaService } from './prisma.service';
+
+@Global()
+@Module({
+  providers: [PrismaService],
+  exports: [PrismaService],
+})
+export class PrismaModule {}
+```
+
+### 4.3 Webhooks Service (src/modules/webhooks/webhooks.service.ts)
+
+```typescript
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
+import { CreateWebhookDto } from './dto/create-webhook.dto';
+import { UpdateWebhookDto } from './dto/update-webhook.dto';
+import { randomBytes } from 'crypto';
+import { ConfigService } from '@nestjs/config';
+
+@Injectable()
+export class WebhooksService {
+  constructor(
+    private prisma: PrismaService,
+    private configService: ConfigService,
+  ) {}
+
+  async create(userId: string, createWebhookDto: CreateWebhookDto) {
+    const token = this.generateToken();
+    
+    const webhook = await this.prisma.webhook.create({
+      data: {
+        userId,
+        token,
+        name: createWebhookDto.name,
+        description: createWebhookDto.description,
+      },
+      select: {
+        id: true,
+        token: true,
+        name: true,
+        description: true,
+        isActive: true,
+        createdAt: true,
+      },
+    });
+
+    // Generate full URL
+    const appUrl = this.configService.get('APP_URL');
+    return {
+      ...webhook,
+      url: `${appUrl}/oh-my-hook/${webhook.token}`,
+    };
+  }
+
+  async findAll(userId: string) {
+    const webhooks = await this.prisma.webhook.findMany({
+      where: { userId },
+      include: {
+        statistics: true,
+        _count: {
+          select: { requests: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const appUrl = this.configService.get('APP_URL');
+    return webhooks.map(webhook => ({
+      ...webhook,
+      url: `${appUrl}/oh-my-hook/${webhook.token}`,
+    }));
+  }
+
+  async findOne(id: string, userId: string) {
+    const webhook = await this.prisma.webhook.findFirst({
+      where: { id, userId },
+      include: {
+        statistics: true,
+        _count: {
+          select: { requests: true },
+        },
+      },
+    });
+
+    if (!webhook) {
+      throw new NotFoundException('Webhook not found');
+    }
+
+    const appUrl = this.configService.get('APP_URL');
+    return {
+      ...webhook,
+      url: `${appUrl}/oh-my-hook/${webhook.token}`,
+    };
+  }
+
+  async findByToken(token: string) {
+    return this.prisma.webhook.findUnique({
+      where: { token },
+    });
+  }
+
+  async update(id: string, userId: string, updateWebhookDto: UpdateWebhookDto) {
+    await this.findOne(id, userId);
+
+    return this.prisma.webhook.update({
+      where: { id },
+      data: updateWebhookDto,
+    });
+  }
+
+  async remove(id: string, userId: string) {
+    await this.findOne(id, userId);
+
+    return this.prisma.webhook.delete({
+      where: { id },
+    });
+  }
+
+  private generateToken(): string {
+    return randomBytes(32).toString('hex');
+  }
+}
+```
+
+### 4.4 Webhooks Controller (src/modules/webhooks/webhooks.controller.ts)
+
+```typescript
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  UseGuards,
+  Request,
+} from '@nestjs/common';
+import { WebhooksService } from './webhooks.service';
+import { CreateWebhookDto } from './dto/create-webhook.dto';
+import { UpdateWebhookDto } from './dto/update-webhook.dto';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+
+@Controller('api/v1/webhooks')
+@UseGuards(JwtAuthGuard)
+export class WebhooksController {
+  constructor(private readonly webhooksService: WebhooksService) {}
+
+  @Post()
+  create(@Request() req, @Body() createWebhookDto: CreateWebhookDto) {
+    return this.webhooksService.create(req.user.userId, createWebhookDto);
+  }
+
+  @Get()
+  findAll(@Request() req) {
+    return this.webhooksService.findAll(req.user.userId);
+  }
+
+  @Get(':id')
+  findOne(@Request() req, @Param('id') id: string) {
+    return this.webhooksService.findOne(id, req.user.userId);
+  }
+
+  @Patch(':id')
+  update(
+    @Request() req,
+    @Param('id') id: string,
+    @Body() updateWebhookDto: UpdateWebhookDto,
+  ) {
+    return this.webhooksService.update(id, req.user.userId, updateWebhookDto);
+  }
+
+  @Delete(':id')
+  remove(@Request() req, @Param('id') id: string) {
+    return this.webhooksService.remove(id, req.user.userId);
+  }
+}
+```
+
+### 4.5 Webhooks Module (src/modules/webhooks/webhooks.module.ts)
+
+```typescript
+import { Module } from '@nestjs/common';
+import { WebhooksService } from './webhooks.service';
+import { WebhooksController } from './webhooks.controller';
+
+@Module({
+  controllers: [WebhooksController],
+  providers: [WebhooksService],
+  exports: [WebhooksService],
+})
+export class WebhooksModule {}
+```
+
+### 4.6 Webhook Receiver Service (src/modules/webhook-receiver/webhook-receiver.service.ts)
+
+```typescript
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
+
+@Injectable()
+export class WebhookReceiverService {
+  constructor(private prisma: PrismaService) {}
+
+  async receiveWebhook(
+    token: string,
+    method: string,
+    path: string,
+    query: any,
+    headers: any,
+    body: any,
+    ip: string,
+  ) {
+    const startTime = Date.now();
+
+    // 1. Find webhook
+    const webhook = await this.prisma.webhook.findUnique({
+      where: { token },
+    });
+
+    if (!webhook || !webhook.isActive) {
+      throw new NotFoundException('Webhook not found or inactive');
+    }
+
+    // 2. Sanitize headers (remove sensitive data)
+    const sanitizedHeaders = this.sanitizeHeaders(headers);
+
+    // 3. Calculate body size
+    const bodyString = typeof body === 'string' ? body : JSON.stringify(body);
+    const bodySize = Buffer.byteLength(bodyString);
+
+    // 4. Store request
+    const webhookRequest = await this.prisma.webhookRequest.create({
+      data: {
+        webhookId: webhook.id,
+        method,
+        path,
+        queryParams: query,
+        headers: sanitizedHeaders,
+        body: bodyString,
+        bodySize: BigInt(bodySize),
+        ipAddress: ip,
+        userAgent: headers['user-agent'],
+        processingTimeMs: Date.now() - startTime,
+      },
+    });
+
+    // 5. Update statistics
+    await this.updateStatistics(webhook.id, method);
+
+    return {
+      success: true,
+      message: 'Webhook received',
+      requestId: webhookRequest.id,
+      timestamp: webhookRequest.receivedAt,
+    };
+  }
+
+  private sanitizeHeaders(headers: any): any {
+    const sensitive = [
+      'authorization',
+      'cookie',
+      'x-api-key',
+      'api-key',
+      'token',
+      'password',
+    ];
+    const sanitized = { ...headers };
+
+    for (const key of Object.keys(sanitized)) {
+      if (sensitive.some(s => key.toLowerCase().includes(s))) {
+        sanitized[key] = '[REDACTED]';
+      }
+    }
+
+    return sanitized;
+  }
+
+  private async updateStatistics(webhookId: string, method: string) {
+    const stats = await this.prisma.webhookStatistic.findUnique({
+      where: { webhookId },
+    });
+
+    const methodsCount = (stats?.methodsCount as any) || {};
+    methodsCount[method] = (methodsCount[method] || 0) + 1;
+
+    await this.prisma.webhookStatistic.upsert({
+      where: { webhookId },
+      create: {
+        webhookId,
+        totalRequests: 1,
+        lastRequestAt: new Date(),
+        methodsCount,
+      },
+      update: {
+        totalRequests: { increment: 1 },
+        lastRequestAt: new Date(),
+        methodsCount,
+      },
+    });
+  }
+}
+```
+
+### 4.7 Webhook Receiver Controller (src/modules/webhook-receiver/webhook-receiver.controller.ts)
+
+```typescript
+import {
+  All,
+  Controller,
+  Param,
+  Req,
+  Res,
+  HttpStatus,
+} from '@nestjs/common';
+import { Request, Response } from 'express';
+import { WebhookReceiverService } from './webhook-receiver.service';
+
+@Controller('oh-my-hook')
+export class WebhookReceiverController {
+  constructor(
+    private readonly webhookReceiverService: WebhookReceiverService,
+  ) {}
+
+  @All(':token')
+  async receiveWebhook(
+    @Param('token') token: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    try {
+      const result = await this.webhookReceiverService.receiveWebhook(
+        token,
+        req.method,
+        req.path,
+        req.query,
+        req.headers,
+        req.body,
+        req.ip,
+      );
+
+      return res.status(HttpStatus.OK).json(result);
+    } catch (error) {
+      if (error.status === 404) {
+        return res.status(HttpStatus.NOT_FOUND).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+        success: false,
+        message: 'Internal server error',
+      });
+    }
+  }
+}
+```
+
+### 4.8 Webhook Receiver Module (src/modules/webhook-receiver/webhook-receiver.module.ts)
+
+```typescript
+import { Module } from '@nestjs/common';
+import { WebhookReceiverService } from './webhook-receiver.service';
+import { WebhookReceiverController } from './webhook-receiver.controller';
+
+@Module({
+  controllers: [WebhookReceiverController],
+  providers: [WebhookReceiverService],
+})
+export class WebhookReceiverModule {}
+```
+
+### 4.9 Webhook Requests Service (src/modules/webhook-requests/webhook-requests.service.ts)
+
+```typescript
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
+import { QueryRequestsDto } from './dto/query-requests.dto';
+
+@Injectable()
+export class WebhookRequestsService {
+  constructor(private prisma: PrismaService) {}
+
+  async findAll(
+    webhookId: string,
+    userId: string,
+    queryDto: QueryRequestsDto,
+  ) {
+    // Verify webhook belongs to user
+    const webhook = await this.prisma.webhook.findFirst({
+      where: { id: webhookId, userId },
+    });
+
+    if (!webhook) {
+      throw new NotFoundException('Webhook not found');
+    }
+
+    const { page = 1, limit = 50, method, sortOrder = 'desc' } = queryDto;
+    const skip = (page - 1) * limit;
+
+    const where = {
+      webhookId,
+      ...(method && { method }),
+    };
+
+    const [requests, total] = await Promise.all([
+      this.prisma.webhookRequest.findMany({
+        where,
+        orderBy: { receivedAt: sortOrder },
+        skip,
+        take: limit,
+        select: {
+          id: true,
+          method: true,
+          path: true,
+          queryParams: true,
+          headers: true,
+          bodySize: true,
+          ipAddress: true,
+          userAgent: true,
+          receivedAt: true,
+          processingTimeMs: true,
+          // Don't include full body in list for performance
+        },
+      }),
+      this.prisma.webhookRequest.count({ where }),
+    ]);
+
+    return {
+      data: requests,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+        hasNextPage: page < Math.ceil(total / limit),
+        hasPreviousPage: page > 1,
+      },
+    };
+  }
+
+  async findOne(id: string, webhookId: string, userId: string) {
+    // Verify webhook belongs to user
+    const webhook = await this.prisma.webhook.findFirst({
+      where: { id: webhookId, userId },
+    });
+
+    if (!webhook) {
+      throw new NotFoundException('Webhook not found');
+    }
+
+    const request = await this.prisma.webhookRequest.findFirst({
+      where: { id, webhookId },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Request not found');
+    }
+
+    return request;
+  }
+
+  async removeAll(webhookId: string, userId: string) {
+    // Verify webhook belongs to user
+    const webhook = await this.prisma.webhook.findFirst({
+      where: { id: webhookId, userId },
+    });
+
+    if (!webhook) {
+      throw new NotFoundException('Webhook not found');
+    }
+
+    const result = await this.prisma.webhookRequest.deleteMany({
+      where: { webhookId },
+    });
+
+    // Reset statistics
+    await this.prisma.webhookStatistic.update({
+      where: { webhookId },
+      data: {
+        totalRequests: 0,
+        lastRequestAt: null,
+        methodsCount: {},
+      },
+    });
+
+    return {
+      success: true,
+      deletedCount: result.count,
+    };
+  }
+
+  async getStatistics(webhookId: string, userId: string) {
+    // Verify webhook belongs to user
+    const webhook = await this.prisma.webhook.findFirst({
+      where: { id: webhookId, userId },
+    });
+
+    if (!webhook) {
+      throw new NotFoundException('Webhook not found');
+    }
+
+    const statistics = await this.prisma.webhookStatistic.findUnique({
+      where: { webhookId },
+    });
+
+    return statistics || {
+      webhookId,
+      totalRequests: 0,
+      lastRequestAt: null,
+      methodsCount: {},
+    };
+  }
+}
+```
+
+### 4.10 Webhook Requests Controller (src/modules/webhook-requests/webhook-requests.controller.ts)
+
+```typescript
+import {
+  Controller,
+  Get,
+  Delete,
+  Param,
+  UseGuards,
+  Request,
+  Query,
+} from '@nestjs/common';
+import { WebhookRequestsService } from './webhook-requests.service';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { QueryRequestsDto } from './dto/query-requests.dto';
+
+@Controller('api/v1/webhooks/:webhookId/requests')
+@UseGuards(JwtAuthGuard)
+export class WebhookRequestsController {
+  constructor(
+    private readonly webhookRequestsService: WebhookRequestsService,
+  ) {}
+
+  @Get()
+  findAll(
+    @Request() req,
+    @Param('webhookId') webhookId: string,
+    @Query() queryDto: QueryRequestsDto,
+  ) {
+    return this.webhookRequestsService.findAll(
+      webhookId,
+      req.user.userId,
+      queryDto,
+    );
+  }
+
+  @Get('statistics')
+  getStatistics(@Request() req, @Param('webhookId') webhookId: string) {
+    return this.webhookRequestsService.getStatistics(
+      webhookId,
+      req.user.userId,
+    );
+  }
+
+  @Get(':id')
+  findOne(
+    @Request() req,
+    @Param('webhookId') webhookId: string,
+    @Param('id') id: string,
+  ) {
+    return this.webhookRequestsService.findOne(id, webhookId, req.user.userId);
+  }
+
+  @Delete()
+  removeAll(@Request() req, @Param('webhookId') webhookId: string) {
+    return this.webhookRequestsService.removeAll(webhookId, req.user.userId);
+  }
+}
+```
+
+### 4.11 Webhook Requests Module (src/modules/webhook-requests/webhook-requests.module.ts)
+
+```typescript
+import { Module } from '@nestjs/common';
+import { WebhookRequestsService } from './webhook-requests.service';
+import { WebhookRequestsController } from './webhook-requests.controller';
+
+@Module({
+  controllers: [WebhookRequestsController],
+  providers: [WebhookRequestsService],
+})
+export class WebhookRequestsModule {}
+```
+
+### 4.12 DTOs
+
+**create-webhook.dto.ts**
+```typescript
+import { IsString, IsOptional, MaxLength, MinLength } from 'class-validator';
+
+export class CreateWebhookDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(255)
+  name: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(1000)
+  description?: string;
+}
+```
+
+**update-webhook.dto.ts**
+```typescript
+import { IsString, IsOptional, MaxLength, IsBoolean } from 'class-validator';
+
+export class UpdateWebhookDto {
+  @IsString()
+  @IsOptional()
+  @MaxLength(255)
+  name?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(1000)
+  description?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  isActive?: boolean;
+}
+```
+
+**query-requests.dto.ts**
+```typescript
+import { IsOptional, IsInt, Min, Max, IsString, IsIn } from 'class-validator';
+import { Type } from 'class-transformer';
+
+export class QueryRequestsDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  limit?: number = 50;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'])
+  method?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['asc', 'desc'])
+  sortOrder?: 'asc' | 'desc' = 'desc';
+}
+```
+
+### 4.13 Auth Module Files
+
+**jwt.strategy.ts**
+```typescript
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { PassportStrategy } from '@nestjs/passport';
+import { ExtractJwt, Strategy } from 'passport-jwt';
+import { ConfigService } from '@nestjs/config';
+import { PrismaService } from '../../../prisma/prisma.service';
+
+@Injectable()
+export class JwtStrategy extends PassportStrategy(Strategy) {
+  constructor(
+    private configService: ConfigService,
+    private prisma: PrismaService,
+  ) {
+    super({
+      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      ignoreExpiration: false,
+      secretOrKey: configService.get('JWT_SECRET'),
+    });
+  }
+
+  async validate(payload: any) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException();
+    }
+
+    return { userId: payload.sub, email: payload.email };
+  }
+}
+```
+
+**jwt-auth.guard.ts**
+```typescript
+import { Injectable } from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
+
+@Injectable()
+export class JwtAuthGuard extends AuthGuard('jwt') {}
+```
+
+**auth.service.ts**
+```typescript
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { PrismaService } from '../../prisma/prisma.service';
+import * as bcrypt from 'bcrypt';
+
+@Injectable()
+export class AuthService {
+  constructor(
+    private prisma: PrismaService,
+    private jwtService: JwtService,
+  ) {}
+
+  async register(email: string, password: string) {
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const user = await this.prisma.user.create({
+      data: {
+        email,
+        password: hashedPassword,
+      },
+      select: {
+        id: true,
+        email: true,
+        createdAt: true,
+      },
+    });
+
+    const token = this.generateToken(user.id, user.email);
+
+    return {
+      user,
+      access_token: token,
+    };
+  }
+
+  async login(email: string, password: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const token = this.generateToken(user.id, user.email);
+
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+      },
+      access_token: token,
+    };
+  }
+
+  private generateToken(userId: string, email: string): string {
+    const payload = { sub: userId, email };
+    return this.jwtService.sign(payload);
+  }
+}
+```
+
+**auth.controller.ts**
+```typescript
+import { Controller, Post, Body } from '@nestjs/common';
+import { AuthService } from './auth.service';
+import { IsEmail, IsString, MinLength } from 'class-validator';
+
+class RegisterDto {
+  @IsEmail()
+  email: string;
+
+  @IsString()
+  @MinLength(6)
+  password: string;
+}
+
+class LoginDto {
+  @IsEmail()
+  email: string;
+
+  @IsString()
+  password: string;
+}
+
+@Controller('api/v1/auth')
+export class AuthController {
+  constructor(private readonly authService: AuthService) {}
+
+  @Post('register')
+  register(@Body() registerDto: RegisterDto) {
+    return this.authService.register(registerDto.email, registerDto.password);
+  }
+
+  @Post('login')
+  login(@Body() loginDto: LoginDto) {
+    return this.authService.login(loginDto.email, loginDto.password);
+  }
+}
+```
+
+**auth.module.ts**
+```typescript
+import { Module } from '@nestjs/common';
+import { JwtModule } from '@nestjs/jwt';
+import { PassportModule } from '@nestjs/passport';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { AuthService } from './auth.service';
+import { AuthController } from './auth.controller';
+import { JwtStrategy } from './strategies/jwt.strategy';
+
+@Module({
+  imports: [
+    PassportModule,
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      useFactory: async (configService: ConfigService) => ({
+        secret: configService.get('JWT_SECRET'),
+        signOptions: {
+          expiresIn: configService.get('JWT_EXPIRES_IN'),
+        },
+      }),
+      inject: [ConfigService],
+    }),
+  ],
+  controllers: [AuthController],
+  providers: [AuthService, JwtStrategy],
+  exports: [AuthService],
+})
+export class AuthModule {}
+```
+
+### 4.14 Main Module (src/app.module.ts)
+
+```typescript
+import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { ThrottlerModule } from '@nestjs/throttler';
+import { PrismaModule } from './prisma/prisma.module';
+import { WebhooksModule } from './modules/webhooks/webhooks.module';
+import { WebhookReceiverModule } from './modules/webhook-receiver/webhook-receiver.module';
+import { WebhookRequestsModule } from './modules/webhook-requests/webhook-requests.module';
+import { AuthModule } from './modules/auth/auth.module';
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+    }),
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000, // 60 seconds
+        limit: 100, // 100 requests per minute
+      },
+    ]),
+    PrismaModule,
+    AuthModule,
+    WebhooksModule,
+    WebhookReceiverModule,
+    WebhookRequestsModule,
+  ],
+})
+export class AppModule {}
+```
+
+### 4.15 Main Bootstrap (src/main.ts)
+
+```typescript
+import { NestFactory } from '@nestjs/core';
+import { ValidationPipe } from '@nestjs/common';
+import { AppModule } from './app.module';
+import { ConfigService } from '@nestjs/config';
+import * as bodyParser from 'body-parser';
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
+
+  const configService = app.get(ConfigService);
+
+  // Enable CORS
+  app.enableCors({
+    origin: '*', // In production, specify allowed origins
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    credentials: true,
+  });
+
+  // Global validation pipe
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      forbidNonWhitelisted: false,
+    }),
+  );
+
+  // Increase body size limit for webhook receiver
+  const maxBodySize = configService.get('MAX_BODY_SIZE_MB') || 10;
+  app.use(bodyParser.json({ limit: `${maxBodySize}mb` }));
+  app.use(bodyParser.urlencoded({ limit: `${maxBodySize}mb`, extended: true }));
+  app.use(bodyParser.raw({ limit: `${maxBodySize}mb`, type: 'application/octet-stream' }));
+  app.use(bodyParser.text({ limit: `${maxBodySize}mb`, type: 'text/*' }));
+
+  const port = configService.get('PORT') || 3000;
+  await app.listen(port);
+
+  console.log(`🚀 Application is running on: http://localhost:${port}`);
+  console.log(`📝 Webhook endpoint: http://localhost:${port}/oh-my-hook/:token`);
+  console.log(`🔐 Auth endpoint: http://localhost:${port}/api/v1/auth`);
+}
+bootstrap();
+```
+
+---
+
+## 5. Package.json Dependencies
+
+```json
+{
+  "name": "webhook-service",
+  "version": "1.0.0",
+  "description": "Webhook Testing Service with NestJS and Prisma",
+  "scripts": {
+    "build": "nest build",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "start": "nest start",
+    "start:dev": "nest start --watch",
+    "start:debug": "nest start --debug --watch",
+    "start:prod": "node dist/main",
+    "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio",
+    "prisma:seed": "ts-node prisma/seed.ts"
+  },
+  "dependencies": {
+    "@nestjs/common": "^10.0.0",
+    "@nestjs/core": "^10.0.0",
+    "@nestjs/platform-express": "^10.0.0",
+    "@nestjs/config": "^3.0.0",
+    "@nestjs/jwt": "^10.0.0",
+    "@nestjs/passport": "^10.0.0",
+    "@nestjs/throttler": "^5.0.0",
+    "@prisma/client": "^5.7.0",
+    "passport": "^0.6.0",
+    "passport-jwt": "^4.0.1",
+    "bcrypt": "^5.1.1",
+    "class-validator": "^0.14.0",
+    "class-transformer": "^0.5.1",
+    "reflect-metadata": "^0.1.13",
+    "rxjs": "^7.8.1",
+    "body-parser": "^1.20.2"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^10.0.0",
+    "@nestjs/schematics": "^10.0.0",
+    "@types/express": "^4.17.17",
+    "@types/node": "^20.0.0",
+    "@types/passport-jwt": "^3.0.13",
+    "@types/bcrypt": "^5.0.2",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.42.0",
+    "eslint-config-prettier": "^9.0.0",
+    "eslint-plugin-prettier": "^5.0.0",
+    "prettier": "^3.0.0",
+    "prisma": "^5.7.0",
+    "typescript": "^5.1.3",
+    "ts-node": "^10.9.1"
+  }
+}
+```
+
+---
+
+## 6. TypeScript Configuration (tsconfig.json)
+
+```json
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "declaration": true,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "target": "ES2021",
+    "sourceMap": true,
+    "outDir": "./dist",
+    "baseUrl": "./",
+    "incremental": true,
+    "skipLibCheck": true,
+    "strictNullChecks": false,
+    "noImplicitAny": false,
+    "strictBindCallApply": false,
+    "forceConsistentCasingInFileNames": false,
+    "noFallthroughCasesInSwitch": false,
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
+```
+
+---
+
+## 7. NestJS CLI Configuration (nest-cli.json)
+
+```json
+{
+  "$schema": "https://json.schemastore.org/nest-cli",
+  "collection": "@nestjs/schematics",
+  "sourceRoot": "src",
+  "compilerOptions": {
+    "deleteOutDir": true
+  }
+}
+```
+
+---
+
+## 8. Setup & Installation Commands
+
+```bash
+# 1. Clone or create project directory
+mkdir webhook-service
+cd webhook-service
+
+# 2. Initialize NestJS project (or use existing)
+npm install
+
+# 3. Install Prisma
+npm install prisma --save-dev
+npm install @prisma/client
+
+# 4. Initialize Prisma
+npx prisma init
+
+# 5. Copy the schema.prisma content to prisma/schema.prisma
+
+# 6. Configure .env file with your database credentials
+
+# 7. Generate Prisma Client
+npx prisma generate
+
+# 8. Run migrations (create tables)
+npx prisma migrate dev --name init
+
+# 9. Start development server
+npm run start:dev
+
+# 10. Open Prisma Studio (optional - database GUI)
+npx prisma studio
+```
+
+---
+
+## 9. API Endpoints Summary
+
+### Authentication
+```
+POST /api/v1/auth/register
+Body: { "email": "user@example.com", "password": "password123" }
+
+POST /api/v1/auth/login
+Body: { "email": "user@example.com", "password": "password123" }
+Response: { "access_token": "jwt_token", "user": {...} }
+```
+
+### Webhooks Management (Requires JWT)
+```
+POST /api/v1/webhooks
+Headers: Authorization: Bearer <token>
+Body: { "name": "My Webhook", "description": "Optional description" }
+Response: { "id": "uuid", "token": "abc123", "url": "https://..." }
+
+GET /api/v1/webhooks
+Headers: Authorization: Bearer <token>
+Response: [{ webhooks array with statistics }]
+
+GET /api/v1/webhooks/:id
+Headers: Authorization: Bearer <token>
+
+PATCH /api/v1/webhooks/:id
+Headers: Authorization: Bearer <token>
+Body: { "name": "Updated Name", "isActive": false }
+
+DELETE /api/v1/webhooks/:id
+Headers: Authorization: Bearer <token>
+```
+
+### Webhook Requests (Requires JWT)
+```
+GET /api/v1/webhooks/:webhookId/requests?page=1&limit=50&method=POST&sortOrder=desc
+Headers: Authorization: Bearer <token>
+Response: { "data": [...], "meta": { "total": 100, "page": 1, ... } }
+
+GET /api/v1/webhooks/:webhookId/requests/statistics
+Headers: Authorization: Bearer <token>
+Response: { "totalRequests": 1234, "methodsCount": {...}, ... }
+
+GET /api/v1/webhooks/:webhookId/requests/:requestId
+Headers: Authorization: Bearer <token>
+Response: { full request details including body }
+
+DELETE /api/v1/webhooks/:webhookId/requests
+Headers: Authorization: Bearer <token>
+Response: { "success": true, "deletedCount": 100 }
+```
+
+### Webhook Receiver (Public - No Auth)
+```
+* /oh-my-hook/:token
+Methods: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS
+Response: { "success": true, "message": "Webhook received", "requestId": "uuid" }
+```
+
+---
+
+## 10. Database Indexes & Optimization
+
+The Prisma schema already includes these indexes:
+
+```prisma
+// webhooks table
+@@index([userId])      // Fast lookup by user
+@@index([token])       // Fast lookup by token
+
+// webhook_requests table
+@@index([webhookId])   // Fast lookup by webhook
+@@index([receivedAt(sort: Desc)])  // Fast sorting by date
+@@index([method])      // Fast filtering by HTTP method
+```
+
+### Additional MySQL Configuration for Performance
+
+```sql
+-- Add to my.cnf or my.ini
+[mysqld]
+# Increase buffer pool for better performance
+innodb_buffer_pool_size = 2G
+
+# Optimize for many connections
+max_connections = 500
+
+# Query cache (if using MySQL < 8.0)
+query_cache_type = 1
+query_cache_size = 128M
+
+# Slow query log for optimization
+slow_query_log = 1
+long_query_time = 2
+```
+
+---
+
+## 11. Testing the Service
+
+### Step 1: Register a User
+```bash
+curl -X POST http://localhost:3000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"test@example.com","password":"password123"}'
+```
+
+### Step 2: Create a Webhook
+```bash
+curl -X POST http://localhost:3000/api/v1/webhooks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{"name":"Test Webhook","description":"My first webhook"}'
+```
+
+### Step 3: Send Test Request to Webhook
+```bash
+# Replace TOKEN with the generated token
+curl -X POST http://localhost:3000/oh-my-hook/TOKEN \
+  -H "Content-Type: application/json" \
+  -d '{"test":"data","message":"Hello webhook!"}'
+```
+
+### Step 4: View Received Requests
+```bash
+curl -X GET http://localhost:3000/api/v1/webhooks/WEBHOOK_ID/requests \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+---
+
+## 12. Scheduled Tasks (Optional)
+
+Create a cron service to cleanup old requests:
+
+**src/modules/cron/cron.service.ts**
+```typescript
+import { Injectable, Logger } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { PrismaService } from '../../prisma/prisma.service';
+import { ConfigService } from '@nestjs/config';
+
+@Injectable()
+export class CronService {
+  private readonly logger = new Logger(CronService.name);
+
+  constructor(
+    private prisma: PrismaService,
+    private configService: ConfigService,
+  ) {}
+
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
+  async cleanupOldRequests() {
+    const retentionDays = this.configService.get('REQUEST_RETENTION_DAYS') || 30;
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
+
+    try {
+      const result = await this.prisma.webhookRequest.deleteMany({
+        where: {
+          receivedAt: {
+            lt: cutoffDate,
+          },
+        },
+      });
+
+      this.logger.log(`Cleaned up ${result.count} old webhook requests`);
+    } catch (error) {
+      this.logger.error('Failed to cleanup old requests', error);
+    }
+  }
+}
+```
+
+Install schedule module:
+```bash
+npm install @nestjs/schedule
+```
+
+Add to app.module.ts:
+```typescript
+import { ScheduleModule } from '@nestjs/schedule';
+
+@Module({
+  imports: [
+    // ... other imports
+    ScheduleModule.forRoot(),
+  ],
+})
+```
+
+---
+
+## 13. Error Handling
+
+Create a global exception filter:
+
+**src/common/filters/http-exception.filter.ts**
+```typescript
+import {
+  ExceptionFilter,
+  Catch,
+  ArgumentsHost,
+  HttpException,
+  HttpStatus,
+} from '@nestjs/common';
+import { Response } from 'express';
+
+@Catch()
+export class AllExceptionsFilter implements ExceptionFilter {
+  catch(exception: unknown, host: ArgumentsHost) {
+    const ctx = host.switchToHttp();
+    const response = ctx.getResponse<Response>();
+
+    let status = HttpStatus.INTERNAL_SERVER_ERROR;
+    let message = 'Internal server error';
+
+    if (exception instanceof HttpException) {
+      status = exception.getStatus();
+      const exceptionResponse = exception.getResponse();
+      message = typeof exceptionResponse === 'string' 
+        ? exceptionResponse 
+        : (exceptionResponse as any).message || message;
+    }
+
+    response.status(status).json({
+      success: false,
+      statusCode: status,
+      message,
+      timestamp: new Date().toISOString(),
+    });
+  }
+}
+```
+
+Add to main.ts:
+```typescript
+import { AllExceptionsFilter } from './common/filters/http-exception.filter';
+
+async function bootstrap() {
+  // ... existing code
+  app.useGlobalFilters(new AllExceptionsFilter());
+  // ...
+}
+```
+
+---
+
+## 14. Logging
+
+Install Winston for better logging:
+```bash
+npm install nest-winston winston
+```
+
+**src/common/logger/logger.module.ts**
+```typescript
+import { Module } from '@nestjs/common';
+import { WinstonModule } from 'nest-winston';
+import * as winston from 'winston';
+
+@Module({
+  imports: [
+    WinstonModule.forRoot({
+      transports: [
+        new winston.transports.Console({
+          format: winston.format.combine(
+            winston.format.timestamp(),
+            winston.format.colorize(),
+            winston.format.printf(({ timestamp, level, message, context }) => {
+              return `${timestamp} [${context}] ${level}: ${message}`;
+            }),
+          ),
+        }),
+        new winston.transports.File({
+          filename: 'logs/error.log',
+          level: 'error',
+          format: winston.format.combine(
+            winston.format.timestamp(),
+            winston.format.json(),
+          ),
+        }),
+        new winston.transports.File({
+          filename: 'logs/combined.log',
+          format: winston.format.combine(
+            winston.format.timestamp(),
+            winston.format.json(),
+          ),
+        }),
+      ],
+    }),
+  ],
+})
+export class LoggerModule {}
+```
+
+---
+
+## 15. Docker Support
+
+**Dockerfile**
+```dockerfile
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+COPY package*.json ./
+COPY prisma ./prisma/
+
+RUN npm ci
+
+COPY . .
+
+RUN npm run build
+RUN npx prisma generate
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/prisma ./prisma
+COPY package*.json ./
+
+EXPOSE 3000
+
+CMD ["npm", "run", "start:prod"]
+```
+
+**docker-compose.yml**
+```yaml
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=mysql://webhook_user:webhook_pass@mysql:3306/webhook_db
+      - JWT_SECRET=your-super-secret-key
+      - PORT=3000
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      - MYSQL_ROOT_PASSWORD=root_password
+      - MYSQL_DATABASE=webhook_db
+      - MYSQL_USER=webhook_user
+      - MYSQL_PASSWORD=webhook_pass
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+```
+
+**Run with Docker:**
+```bash
+docker-compose up -d
+docker-compose exec app npx prisma migrate deploy
+```
+
+---
+
+## 16. Environment-specific Configurations
+
+**config/configuration.ts**
+```typescript
+export default () => ({
+  port: parseInt(process.env.PORT, 10) || 3000,
+  database: {
+    url: process.env.DATABASE_URL,
+  },
+  jwt: {
+    secret: process.env.JWT_SECRET,
+    expiresIn: process.env.JWT_EXPIRES_IN || '7d',
+  },
+  webhook: {
+    maxBodySizeMb: parseInt(process.env.MAX_BODY_SIZE_MB, 10) || 10,
+    retentionDays: parseInt(process.env.REQUEST_RETENTION_DAYS, 10) || 30,
+  },
+  rateLimit: {
+    ttl: parseInt(process.env.RATE_LIMIT_TTL, 10) || 60,
+    max: parseInt(process.env.RATE_LIMIT_MAX, 10) || 100,
+  },
+});
+```
+
+---
+
+## 17. Production Deployment Checklist
+
+### Pre-deployment
+- [ ] Set strong JWT_SECRET (min 32 characters)
+- [ ] Configure DATABASE_URL for production database
+- [ ] Run `npx prisma migrate deploy`
+- [ ] Set NODE_ENV=production
+- [ ] Configure CORS with specific origins
+- [ ] Set appropriate rate limits
+- [ ] Enable HTTPS/SSL
+
+### Infrastructure
+- [ ] MySQL 8.0+ with sufficient storage (start with 20GB+)
+- [ ] Backup strategy for database (daily automated backups)
+- [ ] Load balancer (if running multiple instances)
+- [ ] Reverse proxy (Nginx/Apache)
+- [ ] Process manager (PM2/systemd)
+
+### Security
+- [ ] Enable firewall (only allow necessary ports)
+- [ ] Use environment variables (never commit .env)
+- [ ] Regular security updates
+- [ ] SQL injection protection (Prisma handles this)
+- [ ] Rate limiting enabled
+- [ ] Input validation on all endpoints
+
+### Monitoring
+- [ ] Application logs (Winston to file)
+- [ ] Error tracking (Sentry recommended)
+- [ ] Database performance monitoring
+- [ ] API response time monitoring
+- [ ] Disk space alerts
+- [ ] Uptime monitoring
+
+### Scaling
+- [ ] Database connection pooling configured
+- [ ] Consider read replicas for high traffic
+- [ ] CDN for static assets (if any)
+- [ ] Horizontal scaling with PM2 cluster mode or K8s
+
+---
+
+## 18. Useful Commands
+
+```bash
+# Development
+npm run start:dev              # Start in watch mode
+npx prisma studio              # Open database GUI
+npx prisma migrate dev         # Create migration
+
+# Production
+npm run build                  # Build for production
+npm run start:prod             # Start production server
+
+# Database
+npx prisma generate            # Generate Prisma Client
+npx prisma migrate deploy      # Run migrations in production
+npx prisma db push             # Push schema without migration
+npx prisma db seed             # Run seed script
+
+# Docker
+docker-compose up -d           # Start all services
+docker-compose logs -f app     # View logs
+docker-compose down            # Stop all services
+docker-compose exec app sh     # Access container shell
+
+# PM2 (Process Manager)
+pm2 start dist/main.js --name webhook-service
+pm2 logs webhook-service
+pm2 restart webhook-service
+pm2 stop webhook-service
+```
+
+---
+
+## 19. Common Issues & Solutions
+
+### Issue: Prisma Client not generated
+```bash
+# Solution
+npx prisma generate
+```
+
+### Issue: Database connection failed
+```bash
+# Check DATABASE_URL in .env
+# Test connection
+npx prisma db pull
+```
+
+### Issue: Body too large error
+```typescript
+// Increase in main.ts
+app.use(bodyParser.json({ limit: '50mb' }));
+```
+
+### Issue: CORS errors
+```typescript
+// Configure CORS in main.ts
+app.enableCors({
+  origin: ['https://your-frontend.com'],
+  credentials: true,
+});
+```
+
+---
+
+## 20. Next Steps & Enhancements
+
+### Phase 1 (MVP) - Current Implementation ✅
+- Basic webhook creation and management
+- Request capturing and storage
+- JWT authentication
+- Request history and filtering
+
+### Phase 2 (Future Enhancements)
+- [ ] Real-time updates (WebSocket/SSE)
+- [ ] Request replay functionality
+- [ ] Custom response configuration
+- [ ] Webhook forwarding to external URLs
+- [ ] Request filtering and search
+- [ ] Export requests (CSV/JSON)
+
+### Phase 3 (Advanced Features)
+- [ ] Team collaboration (multi-user webhooks)
+- [ ] API key authentication (alternative to JWT)
+- [ ] Request transformation rules
+- [ ] Webhook templates
+- [ ] Analytics dashboard
+- [ ] Webhook marketplace/sharing
+
+---
+
+## Architecture Diagram
+
+```
+┌─────────────────────────────────────────┐
+│           Client Application            │
+│        (External Webhook Sender)        │
+└──────────────┬──────────────────────────┘
+               │ HTTP Request
+               ↓
+┌─────────────────────────────────────────┐
+│         Load Balancer / Nginx           │
+└──────────────┬──────────────────────────┘
+               ↓
+┌─────────────────────────────────────────┐
+│         NestJS Application              │
+│                                         │
+│  ┌────────────────────────────────┐   │
+│  │  Webhook Receiver Controller   │   │
+│  │  /oh-my-hook/:token            │   │
+│  └────────────┬───────────────────┘   │
+│               │                         │
+│  ┌────────────▼───────────────────┐   │
+│  │  WebhookReceiverService        │   │
+│  │  - Validate webhook            │   │
+│  │  - Sanitize data               │   │
+│  │  - Store request               │   │
+│  │  - Update statistics           │   │
+│  └────────────┬───────────────────┘   │
+│               │                         │
+│  ┌────────────▼───────────────────┐   │
+│  │     Prisma ORM Layer           │   │
+│  └────────────┬───────────────────┘   │
+└───────────────┼─────────────────────────┘
+                │
+                ↓
+┌─────────────────────────────────────────┐
+│           MySQL Database                │
+│                                         │
+│  - users                                │
+│  - webhooks                             │
+│  - webhook_requests                     │
+│  - webhook_statistics                   │
+└─────────────────────────────────────────┘
+
+
+┌─────────────────────────────────────────┐
+│        Frontend Dashboard               │
+└──────────────┬──────────────────────────┘
+               │ HTTP + JWT
+               ↓
+┌─────────────────────────────────────────┐
+│      NestJS API Controllers             │
+│                                         │
+│  /api/v1/auth/*        (Auth)          │
+│  /api/v1/webhooks/*    (CRUD)          │
+│  /api/v1/webhooks/:id/requests/*       │
+└──────────────┬──────────────────────────┘
+               │
+               ↓
+         [Same Database]
+```
+
+---
+
+This completes the comprehensive guide for building a webhook testing service with NestJS, Prisma, and MySQL without Redis and WebSocket dependencies!
