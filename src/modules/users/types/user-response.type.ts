@@ -1,7 +1,7 @@
 export interface UserResponse {
-  id: number;
+  id: string;
   email: string;
-  name: string;
+  apiKey: string;
   createdAt: Date;
   updatedAt: Date;
 }

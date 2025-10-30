@@ -16,7 +16,7 @@ export class UsersService {
         content: {
           id: user.id,
           email: user.email,
-          name: user.name,
+          apiKey: user.apiKey,
           createdAt: user.createdAt,
         },
       };
@@ -42,7 +42,7 @@ export class UsersService {
     };
   }
 
-  async findOne(id: number) {
+  async findOne(id: string) {
     const user = await this.usersRepository.findOne(id);
     if (!user) {
       return {
@@ -56,7 +56,7 @@ export class UsersService {
     };
   }
 
-  async update(id: number, updateUserDto: UpdateUserDto) {
+  async update(id: string, updateUserDto: UpdateUserDto) {
     try {
       const user = await this.usersRepository.update(id, updateUserDto);
       return {
@@ -84,7 +84,7 @@ export class UsersService {
     }
   }
 
-  async remove(id: number) {
+  async remove(id: string) {
     try {
       const user = await this.usersRepository.remove(id);
       return {

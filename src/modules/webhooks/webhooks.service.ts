@@ -17,7 +17,10 @@ export class WebhooksService {
     private customLogger: CustomLoggerService,
   ) {}
 
-  async create(userId: string, createWebhookDto: CreateWebhookDto): Promise<WebhookResponseDto> {
+  async create(
+    userId: string,
+    createWebhookDto: CreateWebhookDto,
+  ): Promise<WebhookResponseDto> {
     this.logger.log(`🆕 Creating new webhook for user: ${userId}`, {
       name: createWebhookDto.name,
       hasDescription: !!createWebhookDto.description,
@@ -40,6 +43,7 @@ export class WebhooksService {
           description: true,
           isActive: true,
           createdAt: true,
+          updatedAt: true,
         },
       });
 
@@ -69,7 +73,10 @@ export class WebhooksService {
         stack: error.stack,
       });
 
-      this.logger.error(`❌ Failed to create webhook: ${error.message}`, error.stack);
+      this.logger.error(
+        `❌ Failed to create webhook: ${error.message}`,
+        error.stack,
+      );
       throw error;
     }
   }
@@ -90,16 +97,39 @@ export class WebhooksService {
       });
 
       const appUrl = this.configService.get('app.url');
-      const result = webhooks.map(webhook => ({
-        ...webhook,
+      const result = webhooks.map((webhook) => ({
+        id: webhook.id,
+        token: webhook.token,
+        name: webhook.name,
+        description: webhook.description,
+        isActive: webhook.isActive,
+        createdAt: webhook.createdAt,
+        updatedAt: webhook.updatedAt,
         url: `${appUrl}/oh-my-hook/${webhook.token}`,
+        statistics: webhook.statistics
+          ? {
+              id: webhook.statistics.webhookId, // Using webhookId as id since that's the primary key
+              webhookId: webhook.statistics.webhookId,
+              totalRequests: webhook.statistics.totalRequests.toString(),
+              lastRequestAt: webhook.statistics.lastRequestAt,
+              methodsCount:
+                (webhook.statistics.methodsCount as Record<string, number>) ||
+                {},
+            }
+          : undefined,
+        _count: webhook._count,
       }));
 
-      this.logger.debug(`✅ Found ${webhooks.length} webhooks for user: ${userId}`);
+      this.logger.debug(
+        `✅ Found ${webhooks.length} webhooks for user: ${userId}`,
+      );
 
       return result;
     } catch (error) {
-      this.logger.error(`❌ Failed to fetch webhooks for user ${userId}: ${error.message}`, error.stack);
+      this.logger.error(
+        `❌ Failed to fetch webhooks for user ${userId}: ${error.message}`,
+        error.stack,
+      );
       throw error;
     }
   }
@@ -124,9 +154,27 @@ export class WebhooksService {
       }
 
       const appUrl = this.configService.get('app.url');
-      const result = {
-        ...webhook,
+      const result: WebhookResponseDto = {
+        id: webhook.id,
+        token: webhook.token,
+        name: webhook.name,
+        description: webhook.description,
+        isActive: webhook.isActive,
+        createdAt: webhook.createdAt,
+        updatedAt: webhook.updatedAt,
         url: `${appUrl}/oh-my-hook/${webhook.token}`,
+        statistics: webhook.statistics
+          ? {
+              id: webhook.statistics.webhookId, // Using webhookId as id since that's the primary key
+              webhookId: webhook.statistics.webhookId,
+              totalRequests: webhook.statistics.totalRequests.toString(),
+              lastRequestAt: webhook.statistics.lastRequestAt,
+              methodsCount:
+                (webhook.statistics.methodsCount as Record<string, number>) ||
+                {},
+            }
+          : undefined,
+        _count: webhook._count,
       };
 
       this.logger.debug(`✅ Found webhook: ${webhook.name} (${webhook.id})`);
@@ -137,7 +185,10 @@ export class WebhooksService {
         throw error;
       }
 
-      this.logger.error(`❌ Failed to fetch webhook ${id} for user ${userId}: ${error.message}`, error.stack);
+      this.logger.error(
+        `❌ Failed to fetch webhook ${id} for user ${userId}: ${error.message}`,
+        error.stack,
+      );
       throw error;
     }
   }
@@ -186,7 +237,10 @@ export class WebhooksService {
         stack: error.stack,
       });
 
-      this.logger.error(`❌ Failed to update webhook ${id}: ${error.message}`, error.stack);
+      this.logger.error(
+        `❌ Failed to update webhook ${id}: ${error.message}`,
+        error.stack,
+      );
       throw error;
     }
   }
@@ -224,7 +278,10 @@ export class WebhooksService {
         stack: error.stack,
       });
 
-      this.logger.error(`❌ Failed to delete webhook ${id}: ${error.message}`, error.stack);
+      this.logger.error(
+        `❌ Failed to delete webhook ${id}: ${error.message}`,
+        error.stack,
+      );
       throw error;
     }
   }

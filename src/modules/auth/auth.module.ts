@@ -12,15 +12,12 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
   imports: [
     PassportModule,
     UsersModule,
-    JwtModule.registerAsync({
-      imports: [ConfigModule],
-      useFactory: async (configService: ConfigService) => ({
-        secret: configService.get<string>('jwt.secret'),
-        signOptions: {
-          expiresIn: configService.get<string>('jwt.expiresIn', '7d'),
-        },
-      }),
-      inject: [ConfigService],
+    JwtModule.register({
+      secret: 'aaa',
+      signOptions: { expiresIn: '24h' },
+      verifyOptions: {
+        ignoreExpiration: true,
+      },
     }),
   ],
   controllers: [AuthController],

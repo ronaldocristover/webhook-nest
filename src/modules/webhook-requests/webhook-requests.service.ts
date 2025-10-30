@@ -38,6 +38,7 @@ export class WebhookRequestsService {
         take: limit,
         select: {
           id: true,
+          webhookId: true,
           method: true,
           path: true,
           queryParams: true,
@@ -54,12 +55,13 @@ export class WebhookRequestsService {
     ]);
 
     // Convert BigInt to string for JSON serialization
-    const serializedRequests = requests.map(request => ({
+    const serializedRequests = requests.map((request) => ({
       ...request,
       bodySize: request.bodySize ? request.bodySize.toString() : null,
     }));
 
     return {
+      success: true,
       data: serializedRequests,
       meta: {
         total,
@@ -72,7 +74,11 @@ export class WebhookRequestsService {
     };
   }
 
-  async findOne(id: string, webhookId: string, userId: string): Promise<WebhookRequestResponseDto> {
+  async findOne(
+    id: string,
+    webhookId: string,
+    userId: string,
+  ): Promise<WebhookRequestResponseDto> {
     // Verify webhook belongs to user
     const webhook = await this.prisma.webhook.findFirst({
       where: { id: webhookId, userId },
@@ -155,7 +161,9 @@ export class WebhookRequestsService {
     // Convert BigInt to string for JSON serialization
     return {
       ...statistics,
-      totalRequests: statistics.totalRequests ? statistics.totalRequests.toString() : '0',
+      totalRequests: statistics.totalRequests
+        ? statistics.totalRequests.toString()
+        : '0',
     };
   }
 }
