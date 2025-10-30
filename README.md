@@ -2,98 +2,247 @@
   <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
 </p>
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+<h1 align="center">🪝 Webhook Receiver Service</h1>
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://coveralls.io/github/nestjs/nest?branch=master" target="_blank"><img src="https://coveralls.io/repos/github/nestjs/nest/badge.svg?branch=master#9" alt="Coverage" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+<p align="center">A robust <a href="http://nodejs.org" target="_blank">Node.js</a> webhook receiver service built with <a href="https://nestjs.com/" target="_blank">NestJS</a> for capturing, storing, and analyzing webhook requests.</p>
 
 ## Description
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+This is a comprehensive webhook receiver service that allows you to:
+- **Receive webhooks** from external services via unique token-based endpoints
+- **Store and analyze** all incoming webhook data including headers, payload, and metadata
+- **Monitor requests** with detailed logging and statistics
+- **Secure authentication** using JWT tokens and API keys
+- **Real-time tracking** of webhook requests with processing times and analytics
 
-## Project setup
+### Key Features
 
+- 🔐 **JWT Authentication** with user registration and API key management
+- 🪝 **Unique Webhook Endpoints** with token-based routing (`/oh-my-hook/:token`)
+- 📊 **Request Analytics** with detailed statistics and processing metrics
+- 🗄️ **Persistent Storage** using MySQL and Prisma ORM
+- 📝 **Comprehensive Logging** with Winston and Loki integration
+- 🛡️ **Security Features** including rate limiting and CORS protection
+- 📈 **Request History** with full payload and header capture
+- ⚡ **High Performance** with configurable body size limits and async processing
+
+## Quick Start
+
+### Prerequisites
+
+- **Node.js** (v18 or higher)
+- **MySQL** database
+- **npm** or **yarn** package manager
+
+### Installation
+
+1. **Clone the repository**
+```bash
+git clone <repository-url>
+cd webhook-nest
+```
+
+2. **Install dependencies**
 ```bash
 $ npm install
 ```
 
-## Compile and run the project
+3. **Environment Setup**
+Create a `.env` file in the root directory:
+```bash
+# Database
+DATABASE_URL="mysql://username:password@localhost:3306/webhook_db"
+
+# JWT
+JWT_SECRET="your-super-secret-jwt-key"
+JWT_EXPIRES_IN="24h"
+
+# Application
+PORT=3000
+NODE_ENV=development
+
+# Webhook Configuration
+WEBHOOK_MAX_BODY_SIZE_MB=10
+```
+
+4. **Database Setup**
+```bash
+# Generate Prisma client
+$ npx prisma generate
+
+# Run database migrations
+$ npx prisma migrate dev
+
+# (Optional) Seed the database
+$ npm run db:seed
+```
+
+## Running the Application
 
 ```bash
-# development
-$ npm run start
-
-# watch mode
+# Development with hot reload
 $ npm run start:dev
 
-# production mode
+# Development with SWC (faster compilation)
+$ npm run dev
+
+# Production build
+$ npm run build
 $ npm run start:prod
+
+# Debug mode
+$ npm run start:debug
 ```
 
-## Run tests
+## API Endpoints
+
+### Authentication
+- `POST /api/v1/auth/register` - User registration
+- `POST /api/v1/auth/login` - User login
+- `GET /api/v1/auth/profile` - Get user profile
+
+### Webhook Management
+- `GET /api/v1/webhooks` - List user webhooks
+- `POST /api/v1/webhooks` - Create new webhook
+- `GET /api/v1/webhooks/:id` - Get webhook details
+- `PUT /api/v1/webhooks/:id` - Update webhook
+- `DELETE /api/v1/webhooks/:id` - Delete webhook
+
+### Webhook Receiver
+- `POST /oh-my-hook/:token` - **Receive webhook requests**
+
+### Request Analytics
+- `GET /api/v1/webhook-requests` - List webhook requests
+- `GET /api/v1/webhook-requests/:id` - Get request details
+
+## Testing
 
 ```bash
-# unit tests
+# Unit tests
 $ npm run test
 
-# e2e tests
+# End-to-end tests
 $ npm run test:e2e
 
-# test coverage
+# Test coverage
 $ npm run test:cov
+
+# Watch mode
+$ npm run test:watch
 ```
 
-## Deployment
+## Usage Example
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
-
+### 1. Register and Create a User
 ```bash
-$ npm install -g mau
-$ mau deploy
+curl -X POST http://localhost:3000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "securePassword123"
+  }'
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+### 2. Login and Get JWT Token
+```bash
+curl -X POST http://localhost:3000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "securePassword123"
+  }'
+```
 
-## Resources
+### 3. Create a Webhook
+```bash
+curl -X POST http://localhost:3000/api/v1/webhooks \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "name": "My Test Webhook",
+    "description": " webhook for testing purposes"
+  }'
+```
 
-Check out a few resources that may come in handy when working with NestJS:
+### 4. Send Webhook Data
+```bash
+curl -X POST http://localhost:3000/oh-my-hook/WEBHOOK_TOKEN \
+  -H "Content-Type: application/json" \
+  -d '{
+    "event": "user.created",
+    "data": {
+      "id": 123,
+      "name": "John Doe"
+    }
+  }'
+```
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+## Database Schema
 
-## Support
+The application uses the following main entities:
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+- **Users**: Authentication and API key management
+- **Webhooks**: Unique endpoints with tokens for receiving requests
+- **WebhookRequests**: Detailed log of all incoming webhook data
+- **WebhookStatistics**: Aggregated analytics and metrics
 
-## Stay in touch
+## Configuration
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+### Environment Variables
+- `DATABASE_URL`: MySQL connection string
+- `JWT_SECRET`: Secret key for JWT token signing
+- `JWT_EXPIRES_IN`: JWT token expiration time
+- `PORT`: Application port (default: 3000)
+- `NODE_ENV`: Environment (development/production)
+- `WEBHOOK_MAX_BODY_SIZE_MB`: Maximum webhook payload size (default: 10MB)
+
+## Development
+
+### Code Quality
+```bash
+# Linting
+$ npm run lint
+
+# Formatting
+$ npm run format
+```
+
+### Database Management
+```bash
+# View database
+$ npx prisma studio
+
+# Reset database
+$ npx prisma migrate reset
+
+# Deploy migrations
+$ npx prisma migrate deploy
+```
+
+## Security Features
+
+- **Rate Limiting**: Built-in throttling to prevent abuse
+- **Input Validation**: Comprehensive DTO validation with class-validator
+- **CORS Protection**: Configurable cross-origin resource sharing
+- **Helmet Integration**: Security headers and protections
+- **JWT Authentication**: Secure token-based authentication
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ## License
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Built With
+
+- [NestJS](https://nestjs.com/) - Progressive Node.js framework
+- [Prisma](https://www.prisma.io/) - Next-generation ORM
+- [TypeScript](https://www.typescriptlang.org/) - Type-safe JavaScript
+- [MySQL](https://www.mysql.com/) - Relational database
+- [Winston](https://github.com/winstonjs/winston) - Logging library
