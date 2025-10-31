@@ -1,0 +1,706 @@
+# Webhook Service API Documentation
+
+## Overview
+The Webhook Service is a NestJS-based application that allows users to create, manage, and receive webhooks. It provides real-time monitoring, request analytics, and statistics for webhook endpoints.
+
+**Base URL:** `http://localhost:3000`
+**Version:** v1
+**Authentication:** JWT Bearer Token (except for public webhook endpoints)
+
+## Table of Contents
+1. [Authentication Endpoints](#authentication-endpoints)
+2. [Webhook Management](#webhook-management)
+3. [Webhook Receiver](#webhook-receiver)
+4. [Webhook Request Analytics](#webhook-request-analytics)
+5. [Error Handling](#error-handling)
+6. [Rate Limiting](#rate-limiting)
+
+---
+
+## Authentication Endpoints
+
+All webhook management endpoints require JWT authentication. Public webhook endpoints do not require authentication.
+
+### 1. Register User
+**Endpoint:** `POST /api/v1/auth/register`
+**Description:** Create a new user account
+**Authentication:** Not required
+
+**Request Body:**
+```json
+{
+  "email": "user@example.com",
+  "password": "securepassword123"
+}
+```
+
+**Validation Rules:**
+- `email`: Must be a valid email address
+- `password`: Minimum 6 characters
+
+**Response (Success - 201):**
+```json
+{
+  "id": "uuid-string",
+  "email": "user@example.com",
+  "createdAt": "2025-10-31T12:00:00Z"
+}
+```
+
+**cURL Example:**
+```bash
+curl -X POST http://localhost:3000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "securepassword123"
+  }'
+```
+
+### 2. Login User
+**Endpoint:** `POST /api/v1/auth/login`
+**Description:** Authenticate user and receive JWT token
+**Authentication:** Not required
+
+**Request Body:**
+```json
+{
+  "email": "user@example.com",
+  "password": "securepassword123"
+}
+```
+
+**Response (Success - 200):**
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "user": {
+    "id": "uuid-string",
+    "email": "user@example.com"
+  }
+}
+```
+
+**cURL Example:**
+```bash
+curl -X POST http://localhost:3000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "securepassword123"
+  }'
+```
+
+---
+
+## Webhook Management
+
+All webhook management endpoints require JWT authentication via `Authorization: Bearer <token>` header.
+
+### 3. Create Webhook
+**Endpoint:** `POST /api/v1/webhooks`
+**Description:** Create a new webhook endpoint
+**Authentication:** Required (JWT)
+
+**Request Headers:**
+```
+Authorization: Bearer <jwt_token>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "name": "My Payment Webhook",
+  "description": "Webhook for payment notifications from Stripe"
+}
+```
+
+**Validation Rules:**
+- `name`: Required, 1-255 characters
+- `description`: Optional, max 1000 characters
+
+**Response (Success - 201):**
+```json
+{
+  "id": "webhook-uuid",
+  "name": "My Payment Webhook",
+  "description": "Webhook for payment notifications from Stripe",
+  "url": "http://localhost:3000/oh-my-hook/abc123def456...",
+  "token": "abc123def456...",
+  "isActive": true,
+  "userId": "user-uuid",
+  "createdAt": "2025-10-31T12:00:00Z",
+  "updatedAt": "2025-10-31T12:00:00Z"
+}
+```
+
+**cURL Example:**
+```bash
+curl -X POST http://localhost:3000/api/v1/webhooks \
+  -H "Authorization: Bearer <your_jwt_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "My Payment Webhook",
+    "description": "Webhook for payment notifications from Stripe"
+  }'
+```
+
+### 4. List User Webhooks
+**Endpoint:** `GET /api/v1/webhooks`
+**Description:** Retrieve all webhooks for the authenticated user with statistics
+**Authentication:** Required (JWT)
+
+**Request Headers:**
+```
+Authorization: Bearer <jwt_token>
+```
+
+**Response (Success - 200):**
+```json
+[
+  {
+    "id": "webhook-uuid",
+    "name": "My Payment Webhook",
+    "description": "Webhook for payment notifications from Stripe",
+    "url": "http://localhost:3000/oh-my-hook/abc123def456...",
+    "token": "abc123def456...",
+    "isActive": true,
+    "userId": "user-uuid",
+    "createdAt": "2025-10-31T12:00:00Z",
+    "updatedAt": "2025-10-31T12:00:00Z",
+    "statistics": {
+      "totalRequests": 150,
+      "lastRequestAt": "2025-10-31T11:45:00Z",
+      "methodsCount": {
+        "POST": 140,
+        "GET": 10
+      }
+    }
+  }
+]
+```
+
+**cURL Example:**
+```bash
+curl -X GET http://localhost:3000/api/v1/webhooks \
+  -H "Authorization: Bearer <your_jwt_token>"
+```
+
+### 5. Get Webhook Details
+**Endpoint:** `GET /api/v1/webhooks/:id`
+**Description:** Retrieve details of a specific webhook
+**Authentication:** Required (JWT)
+
+**Parameters:**
+- `id` (path): Webhook UUID
+
+**Request Headers:**
+```
+Authorization: Bearer <jwt_token>
+```
+
+**Response (Success - 200):**
+```json
+{
+  "id": "webhook-uuid",
+  "name": "My Payment Webhook",
+  "description": "Webhook for payment notifications from Stripe",
+  "url": "http://localhost:3000/oh-my-hook/abc123def456...",
+  "token": "abc123def456...",
+  "isActive": true,
+  "userId": "user-uuid",
+  "createdAt": "2025-10-31T12:00:00Z",
+  "updatedAt": "2025-10-31T12:00:00Z"
+}
+```
+
+**cURL Example:**
+```bash
+curl -X GET http://localhost:3000/api/v1/webhooks/webhook-uuid \
+  -H "Authorization: Bearer <your_jwt_token>"
+```
+
+### 6. Update Webhook
+**Endpoint:** `PATCH /api/v1/webhooks/:id`
+**Description:** Update webhook properties
+**Authentication:** Required (JWT)
+
+**Parameters:**
+- `id` (path): Webhook UUID
+
+**Request Headers:**
+```
+Authorization: Bearer <jwt_token>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "name": "Updated Webhook Name",
+  "description": "Updated description",
+  "isActive": false
+}
+```
+
+**Validation Rules:**
+- `name`: Optional, max 255 characters
+- `description`: Optional, max 1000 characters
+- `isActive`: Optional, boolean
+
+**Response (Success - 200):**
+```json
+{
+  "id": "webhook-uuid",
+  "name": "Updated Webhook Name",
+  "description": "Updated description",
+  "url": "http://localhost:3000/oh-my-hook/abc123def456...",
+  "token": "abc123def456...",
+  "isActive": false,
+  "userId": "user-uuid",
+  "createdAt": "2025-10-31T12:00:00Z",
+  "updatedAt": "2025-10-31T12:05:00Z"
+}
+```
+
+**cURL Example:**
+```bash
+curl -X PATCH http://localhost:3000/api/v1/webhooks/webhook-uuid \
+  -H "Authorization: Bearer <your_jwt_token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Updated Webhook Name",
+    "isActive": false
+  }'
+```
+
+### 7. Delete Webhook
+**Endpoint:** `DELETE /api/v1/webhooks/:id`
+**Description:** Delete a webhook and all associated requests
+**Authentication:** Required (JWT)
+
+**Parameters:**
+- `id` (path): Webhook UUID
+
+**Request Headers:**
+```
+Authorization: Bearer <jwt_token>
+```
+
+**Response (Success - 200):**
+```json
+{
+  "success": true,
+  "message": "Webhook deleted successfully"
+}
+```
+
+**cURL Example:**
+```bash
+curl -X DELETE http://localhost:3000/api/v1/webhooks/webhook-uuid \
+  -H "Authorization: Bearer <your_jwt_token>"
+```
+
+---
+
+## Webhook Receiver
+
+Public endpoint for receiving webhook requests. No authentication required.
+
+### 8. Receive Webhook
+**Endpoint:** `ALL /oh-my-hook/:token`
+**Description:** Receive and log webhook requests from external services
+**Authentication:** Not required (Public endpoint)
+**Methods:** Supports all HTTP methods (GET, POST, PUT, PATCH, DELETE, etc.)
+
+**Parameters:**
+- `token` (path): Webhook token generated during webhook creation
+
+**Request:**
+- **URL:** Any webhook URL generated by the system
+- **Headers:** Any headers sent by the external service
+- **Body:** Any payload (JSON, XML, form data, etc.)
+- **Query Parameters:** Any query parameters
+
+**Response (Success - 200):**
+```json
+{
+  "success": true,
+  "message": "Webhook received",
+  "requestId": "request-uuid",
+  "timestamp": "2025-10-31T12:00:00Z"
+}
+```
+
+**Response (Webhook Not Found - 404):**
+```json
+{
+  "success": false,
+  "message": "Webhook not found or inactive"
+}
+```
+
+**cURL Examples:**
+
+**POST with JSON payload:**
+```bash
+curl -X POST http://localhost:3000/oh-my-hook/abc123def456 \
+  -H "Content-Type: application/json" \
+  -H "X-Custom-Header: value" \
+  -d '{
+    "event": "payment.completed",
+    "data": {
+      "amount": 1000,
+      "currency": "USD",
+      "customer_id": "cust_123"
+    }
+  }'
+```
+
+**GET with query parameters:**
+```bash
+curl -X GET "http://localhost:3000/oh-my-hook/abc123def456?event=test&status=success" \
+  -H "User-Agent: MyService/1.0"
+```
+
+**POST with form data:**
+```bash
+curl -X POST http://localhost:3000/oh-my-hook/abc123def456 \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "name=John&email=john@example.com&message=Hello"
+```
+
+---
+
+## Webhook Request Analytics
+
+Endpoints for analyzing webhook request data and statistics.
+
+### 9. List Webhook Requests
+**Endpoint:** `GET /api/v1/webhooks/:webhookId/requests`
+**Description:** Retrieve paginated webhook requests with filtering options
+**Authentication:** Required (JWT)
+
+**Parameters:**
+- `webhookId` (path): Webhook UUID
+
+**Query Parameters:**
+- `page` (optional): Page number (default: 1)
+- `limit` (optional): Items per page (default: 10, max: 100)
+- `method` (optional): Filter by HTTP method (GET, POST, etc.)
+- `status` (optional): Filter by response status
+- `from` (optional): Filter from date (ISO 8601)
+- `to` (optional): Filter to date (ISO 8601)
+
+**Request Headers:**
+```
+Authorization: Bearer <jwt_token>
+```
+
+**Response (Success - 200):**
+```json
+{
+  "data": [
+    {
+      "id": "request-uuid",
+      "webhookId": "webhook-uuid",
+      "method": "POST",
+      "path": "/oh-my-hook/abc123def456",
+      "headers": {
+        "content-type": "application/json",
+        "user-agent": "MyService/1.0"
+      },
+      "query": {},
+      "body": {
+        "event": "payment.completed",
+        "amount": 1000
+      },
+      "sourceIp": "192.168.1.100",
+      "userAgent": "MyService/1.0",
+      "createdAt": "2025-10-31T12:00:00Z"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 10,
+    "total": 150,
+    "totalPages": 15
+  }
+}
+```
+
+**cURL Example:**
+```bash
+curl -X GET "http://localhost:3000/api/v1/webhooks/webhook-uuid/requests?page=1&limit=20&method=POST" \
+  -H "Authorization: Bearer <your_jwt_token>"
+```
+
+### 10. Get Webhook Statistics
+**Endpoint:** `GET /api/v1/webhooks/:webhookId/requests/statistics`
+**Description:** Get aggregated statistics for a webhook
+**Authentication:** Required (JWT)
+
+**Parameters:**
+- `webhookId` (path): Webhook UUID
+
+**Request Headers:**
+```
+Authorization: Bearer <jwt_token>
+```
+
+**Response (Success - 200):**
+```json
+{
+  "webhookId": "webhook-uuid",
+  "totalRequests": 1547,
+  "lastRequestAt": "2025-10-31T11:45:00Z",
+  "methodsCount": {
+    "POST": 1200,
+    "GET": 300,
+    "PUT": 35,
+    "DELETE": 12
+  },
+  "dailyStats": [
+    {
+      "date": "2025-10-31",
+      "count": 45
+    },
+    {
+      "date": "2025-10-30",
+      "count": 67
+    }
+  ]
+}
+```
+
+**cURL Example:**
+```bash
+curl -X GET http://localhost:3000/api/v1/webhooks/webhook-uuid/requests/statistics \
+  -H "Authorization: Bearer <your_jwt_token>"
+```
+
+### 11. Get Single Request Details
+**Endpoint:** `GET /api/v1/webhooks/:webhookId/requests/:id`
+**Description:** Get detailed information about a specific webhook request
+**Authentication:** Required (JWT)
+
+**Parameters:**
+- `webhookId` (path): Webhook UUID
+- `id` (path): Request UUID
+
+**Request Headers:**
+```
+Authorization: Bearer <jwt_token>
+```
+
+**Response (Success - 200):**
+```json
+{
+  "id": "request-uuid",
+  "webhookId": "webhook-uuid",
+  "method": "POST",
+  "path": "/oh-my-hook/abc123def456",
+  "headers": {
+    "content-type": "application/json",
+    "user-agent": "Stripe/1.0",
+    "stripe-signature": "t=1635724800,v1=..."
+  },
+  "query": {
+    "version": "2023-10-16"
+  },
+  "body": {
+    "id": "evt_123",
+    "object": "event",
+    "type": "payment_intent.succeeded",
+    "data": {
+      "object": {
+        "id": "pi_123",
+        "amount": 2000,
+        "currency": "usd"
+      }
+    }
+  },
+  "sourceIp": "54.187.174.169",
+  "userAgent": "Stripe/1.0",
+  "contentLength": 1284,
+  "createdAt": "2025-10-31T12:00:00Z"
+}
+```
+
+**cURL Example:**
+```bash
+curl -X GET http://localhost:3000/api/v1/webhooks/webhook-uuid/requests/request-uuid \
+  -H "Authorization: Bearer <your_jwt_token>"
+```
+
+### 12. Delete All Webhook Requests
+**Endpoint:** `DELETE /api/v1/webhooks/:webhookId/requests`
+**Description:** Delete all requests for a specific webhook
+**Authentication:** Required (JWT)
+
+**Parameters:**
+- `webhookId` (path): Webhook UUID
+
+**Request Headers:**
+```
+Authorization: Bearer <jwt_token>
+```
+
+**Response (Success - 200):**
+```json
+{
+  "success": true,
+  "deletedCount": 156,
+  "message": "All requests deleted successfully"
+}
+```
+
+**cURL Example:**
+```bash
+curl -X DELETE http://localhost:3000/api/v1/webhooks/webhook-uuid/requests \
+  -H "Authorization: Bearer <your_jwt_token>"
+```
+
+---
+
+## Error Handling
+
+The API uses standard HTTP status codes and returns consistent error responses.
+
+### Error Response Format
+```json
+{
+  "success": false,
+  "message": "Error description",
+  "error": "ErrorType",
+  "statusCode": 400,
+  "timestamp": "2025-10-31T12:00:00Z",
+  "path": "/api/v1/webhooks"
+}
+```
+
+### Common HTTP Status Codes
+- **200 OK**: Request successful
+- **201 Created**: Resource created successfully
+- **400 Bad Request**: Invalid request data or validation error
+- **401 Unauthorized**: Missing or invalid JWT token
+- **403 Forbidden**: User doesn't have permission for the resource
+- **404 Not Found**: Resource not found
+- **429 Too Many Requests**: Rate limit exceeded
+- **500 Internal Server Error**: Server error
+
+### Validation Errors
+```json
+{
+  "success": false,
+  "message": "Validation failed",
+  "errors": [
+    {
+      "field": "email",
+      "message": "must be a valid email"
+    },
+    {
+      "field": "password",
+      "message": "must be longer than or equal to 6 characters"
+    }
+  ],
+  "statusCode": 400
+}
+```
+
+---
+
+## Rate Limiting
+
+The API implements rate limiting to prevent abuse:
+- **Default Limit**: 100 requests per minute per IP
+- **Rate Limit Headers**: 
+  - `X-RateLimit-Limit`: Maximum requests allowed
+  - `X-RateLimit-Remaining`: Remaining requests in current window
+  - `X-RateLimit-Reset`: Time when rate limit resets
+
+### Rate Limit Exceeded Response
+```json
+{
+  "success": false,
+  "message": "Rate limit exceeded",
+  "statusCode": 429
+}
+```
+
+---
+
+## Authentication Flow Example
+
+### Complete Workflow Example
+
+1. **Register a new user:**
+```bash
+curl -X POST http://localhost:3000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email": "test@example.com", "password": "password123"}'
+```
+
+2. **Login to get JWT token:**
+```bash
+curl -X POST http://localhost:3000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "test@example.com", "password": "password123"}'
+```
+
+3. **Create a webhook (using token from step 2):**
+```bash
+curl -X POST http://localhost:3000/api/v1/webhooks \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Test Webhook", "description": "My first webhook"}'
+```
+
+4. **Send a test request to your webhook:**
+```bash
+curl -X POST http://localhost:3000/oh-my-hook/YOUR_WEBHOOK_TOKEN \
+  -H "Content-Type: application/json" \
+  -d '{"test": "data", "timestamp": "2025-10-31T12:00:00Z"}'
+```
+
+5. **Check received requests:**
+```bash
+curl -X GET http://localhost:3000/api/v1/webhooks/YOUR_WEBHOOK_ID/requests \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+---
+
+## Configuration
+
+### Environment Variables
+- `PORT`: Server port (default: 3000)
+- `JWT_SECRET`: JWT signing secret
+- `JWT_EXPIRES_IN`: JWT expiration time (default: 7d)
+- `APP_URL`: Base application URL for webhook generation
+- `DATABASE_URL`: Database connection string
+- `MAX_BODY_SIZE_MB`: Maximum webhook payload size (default: 10MB)
+- `REQUEST_RETENTION_DAYS`: How long to keep request data (default: 30 days)
+- `RATE_LIMIT_TTL`: Rate limit window in seconds (default: 60)
+- `RATE_LIMIT_MAX`: Maximum requests per window (default: 100)
+
+### Security Features
+- JWT-based authentication
+- Password hashing with bcrypt
+- Rate limiting
+- Request size limits
+- CORS protection
+- Helmet security headers
+- Input validation with class-validator
+
+---
+
+## Support
+
+For questions, issues, or feature requests, please refer to the project documentation or contact the development team.
+
+**Project**: Webhook Service
+**Version**: 0.0.1
+**Framework**: NestJS
+**Database**: MySQL with Prisma ORM

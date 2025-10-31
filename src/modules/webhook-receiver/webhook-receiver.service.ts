@@ -55,8 +55,8 @@ export class WebhookReceiverService {
       const sanitizedHeaders = this.sanitizeHeaders(headers);
 
       // 3. Calculate body size
-      const bodyString = typeof body === 'string' ? body : JSON.stringify(body);
-      const bodySize = Buffer.byteLength(bodyString);
+      const bodyString = body ? (typeof body === 'string' ? body : JSON.stringify(body)) : '';
+      const bodySize = Buffer.byteLength(bodyString || '');
 
       this.logger.debug(`📝 Processing webhook payload`, {
         bodySize,
